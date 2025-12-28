@@ -76,7 +76,7 @@ try {
             $answerStmt->execute([
                 ':lead_id' => $leadId,
                 ':question_id' => (string)$questionId,
-                ':answer_value' => is_scalar($answerValue) ? (string)$answerValue : json_encode($answerValue, JSON_UNESCAPED_UNICODE),
+                ':answer_value' => is_bool($answerValue) ? ($answerValue ? '1' : '0') : (is_scalar($answerValue) ? (string)$answerValue : json_encode($answerValue, JSON_UNESCAPED_UNICODE)),
                 ':created_at' => $now,
             ]);
         }

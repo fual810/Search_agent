@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { motion, useMotionValue, useTransform, AnimatePresence } from 'framer-motion'
-import { Check, X, ArrowRight, CheckCircle2, RotateCcw } from 'lucide-react'
+import { Check, X, ArrowRight, RotateCcw } from 'lucide-react'
+import LottieAnimation from './LottieAnimation'
+import TermsOfService from '../pages/TermsOfService'
 
 // --- Types ---
 type Question = {
@@ -40,6 +42,7 @@ export default function JobMatchingPrototype() {
         email: ''
     })
     const [agreedToPrivacy, setAgreedToPrivacy] = useState(false)
+    const [showTerms, setShowTerms] = useState(false)
 
     // --- Handlers ---
 
@@ -65,18 +68,46 @@ export default function JobMatchingPrototype() {
         }
     }
 
-    const handleFormSubmit = (e: React.FormEvent) => {
+    const handleFormSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!agreedToPrivacy) {
             alert('個人情報の取扱いに同意してください')
             return
         }
-        // Console Log as requested
-        console.log('--- Diagnosis Complete ---')
-        console.log('User Profile:', profile)
-        console.log('Answers:', answers)
 
-        setStep('completion')
+        try {
+            const response = await fetch('/api/submit.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    answers: answers,
+                    contact: {
+                        name: profile.name,
+                        school: profile.university,
+                        phone: profile.phone,
+                        email: profile.email
+                    },
+                    consent: agreedToPrivacy
+                }),
+            })
+
+            const data = await response.json()
+
+            if (!response.ok) {
+                throw new Error(data.error || 'エラーが発生しました')
+            }
+
+            // Console Log as requested
+            console.log('--- Diagnosis Complete ---')
+            console.log('Server Response:', data)
+
+            setStep('completion')
+        } catch (error) {
+            console.error('Submission Error:', error)
+            alert(error instanceof Error ? error.message : '通信エラーが発生しました')
+        }
     }
 
     // --- Render Steps ---
@@ -90,7 +121,7 @@ export default function JobMatchingPrototype() {
                     {step !== 'landing' && <span className="text-primary font-bold text-sm tracking-wider">AGENT MATCH</span>}
                 </header>
 
-                <main className="flex-1 flex flex-col relative w-full">
+                <main className="flex-1 flex flex-col relative w-full min-h-0">
                     <AnimatePresence mode="wait">
 
                         {/* 1. Landing Screen */}
@@ -100,24 +131,29 @@ export default function JobMatchingPrototype() {
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
                                 exit={{ opacity: 0, y: -20 }}
-                                className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-8"
+                                className="flex-1 w-full overflow-y-auto min-h-0 no-scrollbar"
                             >
-                                <div className="space-y-4">
-                                    <h1 className="text-3xl font-bold text-primary">就活エージェント<br />マッチング</h1>
-                                    <p className="text-gray-500 leading-relaxed">
-                                        あなたの志向や状況に合わせて、<br />
-                                        最適なエージェントを提案します。
-                                    </p>
-                                </div>
+                                <div className="flex flex-col items-center p-8 text-center space-y-8 min-h-full">
+                                    <div className="space-y-4">
+                                        <h1 className="text-3xl font-bold text-primary">就活エージェント<br />マッチング</h1>
+                                        <p className="text-gray-500 leading-relaxed">
+                                            あなたの志向や状況に合わせて、<br />
+                                            最適なエージェントを提案します。
+                                        </p>
+                                    </div>
 
-                                <motion.button
-                                    whileHover={{ scale: 1.05 }}
-                                    whileTap={{ scale: 0.95 }}
-                                    onClick={startDiagnosis}
-                                    className="bg-primary text-white font-bold py-4 px-12 rounded-full shadow-lg text-lg flex items-center gap-2"
-                                >
-                                    スタート <ArrowRight size={20} />
-                                </motion.button>
+                                    {/* Service Flow Section */}
+                                    <ServiceFlow />
+
+                                    <motion.button
+                                        whileHover={{ scale: 1.05 }}
+                                        whileTap={{ scale: 0.95 }}
+                                        onClick={startDiagnosis}
+                                        className="bg-primary text-white font-bold py-4 px-12 rounded-full shadow-lg text-lg flex items-center gap-2"
+                                    >
+                                        スタート <ArrowRight size={20} />
+                                    </motion.button>
+                                </div>
                             </motion.div>
                         )}
 
@@ -211,7 +247,17 @@ export default function JobMatchingPrototype() {
                                                 />
                                             </div>
                                             <span className="text-xs text-gray-600 leading-tight group-hover:text-gray-900 transition-colors">
-                                                <a href="#" className="underline text-primary">個人情報の取扱い</a>について同意する
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.preventDefault();
+                                                        setShowTerms(true);
+                                                    }}
+                                                    className="underline text-primary hover:text-primary/80 outline-none focus:ring-2 focus:ring-primary/20 rounded"
+                                                >
+                                                    個人情報の取扱い
+                                                </button>
+                                                について同意する
                                             </span>
                                         </label>
                                     </div>
@@ -220,8 +266,8 @@ export default function JobMatchingPrototype() {
                                         type="submit"
                                         disabled={!agreedToPrivacy}
                                         className={`w-full font-bold py-3 rounded-xl shadow-lg mt-1 transition-all text-sm ${agreedToPrivacy
-                                                ? 'bg-primary text-white active:scale-95 shadow-primary/30'
-                                                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                            ? 'bg-primary text-white active:scale-95 shadow-primary/30'
+                                            : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                                             }`}
                                     >
                                         完了して待つ
@@ -238,8 +284,8 @@ export default function JobMatchingPrototype() {
                                 animate={{ opacity: 1, scale: 1 }}
                                 className="flex-1 flex flex-col items-center justify-center p-8 text-center"
                             >
-                                <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-6 text-green-600">
-                                    <CheckCircle2 size={48} />
+                                <div className="mb-6">
+                                    <LottieAnimation width={240} height={240} />
                                 </div>
                                 <h2 className="text-2xl font-bold text-gray-900 mb-4">受付完了</h2>
                                 <p className="text-gray-500 leading-relaxed">
@@ -250,8 +296,22 @@ export default function JobMatchingPrototype() {
 
                     </AnimatePresence>
                 </main>
+
+                {/* Terms of Service Overlay */}
+                <AnimatePresence>
+                    {showTerms && (
+                        <motion.div
+                            initial={{ opacity: 0, y: 50 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 50 }}
+                            className="fixed inset-0 z-50 overflow-y-auto bg-gray-50 bg-opacity-95" // Added bg-opacity to ensure it covers well but possibly allow seeing behind if desired, though standard modal usu opaque or dimmed. TermsOfService has its own bg.
+                        >
+                            <TermsOfService onClose={() => setShowTerms(false)} />
+                        </motion.div>
+                    )}
+                </AnimatePresence>
             </div>
-        </div>
+        </div >
     )
 }
 
@@ -369,6 +429,65 @@ function QuestionScreen({
                     <RotateCcw size={16} />
                     <span>前に戻る</span>
                 </button>
+            </div>
+        </div>
+    )
+}
+
+function ServiceFlow() {
+    const steps = [
+        {
+            title: "簡単10問回答",
+            desc: "スマホでサクサク！\nあなたの志向を教えてください",
+            img: "/images/step1_questions.png"
+        },
+        {
+            title: "マッチング",
+            desc: "AIとプロの視点で\n最適な企業・エージェントを分析",
+            img: "/images/step2_matching.png"
+        },
+        {
+            title: "エージェント紹介",
+            desc: "あなたにぴったりの\n担当者と出会えます",
+            img: "/images/step3_agent.png"
+        }
+    ]
+
+    return (
+        <div className="w-full max-w-lg mx-auto my-6 px-2">
+            <div className="flex flex-col gap-8 md:flex-row md:gap-4 justify-center items-stretch">
+                {steps.map((step, i) => (
+                    <div key={i} className="flex-1 min-w-[140px] flex flex-col items-center relative group">
+
+                        {/* Connecting Line (Mobile: Down, Desktop: Right) - except last item */}
+                        {i < steps.length - 1 && (
+                            <>
+                                <div className="absolute -bottom-6 left-1/2 w-0.5 h-6 bg-gray-200 md:hidden" />
+                                <div className="absolute top-1/2 -right-3 w-6 h-0.5 bg-gray-200 hidden md:block" />
+                            </>
+                        )}
+
+                        <div className="bg-white rounded-2xl p-4 shadow-lg border border-gray-100 w-full h-full flex flex-col items-center hover:shadow-xl transition-shadow duration-300">
+                            <div className="w-24 h-24 mb-3 relative">
+                                <img
+                                    src={step.img}
+                                    alt={step.title}
+                                    className="w-full h-full object-contain"
+                                />
+                                <div className="absolute -top-2 -left-2 bg-primary text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center shadow-md">
+                                    {i + 1}
+                                </div>
+                            </div>
+
+                            <h3 className="text-lg font-bold text-gray-800 mb-2 whitespace-nowrap">
+                                {step.title}
+                            </h3>
+                            <p className="text-xs text-gray-500 leading-relaxed whitespace-pre-line">
+                                {step.desc}
+                            </p>
+                        </div>
+                    </div>
+                ))}
             </div>
         </div>
     )

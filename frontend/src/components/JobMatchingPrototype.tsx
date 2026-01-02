@@ -1,13 +1,17 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, useMotionValue, useTransform, AnimatePresence } from 'framer-motion'
-import { Check, X, ArrowRight, RotateCcw } from 'lucide-react'
+import { Check, X, ArrowRight, RotateCcw, Mail, Send } from 'lucide-react'
 import LottieAnimation from './LottieAnimation'
 import TermsOfService from '../pages/TermsOfService'
 
 // --- Types ---
+type QuestionType = 'swipe' | 'selection'
+
 type Question = {
     id: number
     text: string
+    type: QuestionType
+    options?: string[]
 }
 
 type UserProfile = {
@@ -17,22 +21,12 @@ type UserProfile = {
     email: string
 }
 
-// --- Questions Data ---
-const QUESTIONS: Question[] = [
-    { id: 1, text: '働くなら、やっぱり都会（東京・大阪など）に出たい？' },
-    { id: 2, text: '誰も知らない『隠れ優良企業』なら、名前は知らなくても興味ある？' },
-    { id: 3, text: '人と話すよりも、モノづくりや専門スキルを磨く方が好き？' },
-    { id: 4, text: 'IT・Web業界のスピード感ある環境に憧れる？' },
-    { id: 5, text: 'ぶっちゃけ、今の自分の就活状況に『焦り』を感じている？' },
-    { id: 6, text: '自己分析や企業探し、一人でやるのは正直しんどい？' },
-    { id: 7, text: 'できれば、1〜2ヶ月以内には内定を決めて安心したい？' },
-    { id: 8, text: 'プロがあなたに合った企業を提案してくれるなら、話を聞いてみたい？' },
-]
-
 export default function JobMatchingPrototype() {
-    const [step, setStep] = useState<'landing' | 'questions' | 'form' | 'completion'>('landing')
+    const [step, setStep] = useState<'landing' | 'questions' | 'form' | 'completion' | 'contact'>('landing')
+    const [questions, setQuestions] = useState<Question[]>([])
     const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
-    const [answers, setAnswers] = useState<boolean[]>([])
+    const [answers, setAnswers] = useState<(boolean | string)[]>([])
+    const [isLoading, setIsLoading] = useState(false)
 
     // Form State
     const [profile, setProfile] = useState<UserProfile>({
@@ -44,17 +38,46 @@ export default function JobMatchingPrototype() {
     const [agreedToPrivacy, setAgreedToPrivacy] = useState(false)
     const [showTerms, setShowTerms] = useState(false)
 
+    // API State
+    const [isSubmitting, setIsSubmitting] = useState(false)
+    const [submitError, setSubmitError] = useState<string | null>(null)
+    const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
+
+    // --- Data Fetching ---
+    useEffect(() => {
+        const fetchQuestions = async () => {
+            setIsLoading(true)
+            try {
+                const response = await fetch('/api/questions.php')
+                const data = await response.json()
+                if (data.questions) {
+                    setQuestions(data.questions)
+                }
+            } catch (error) {
+                console.error('Failed to fetch questions:', error)
+            } finally {
+                setIsLoading(false)
+            }
+        }
+
+        fetchQuestions()
+    }, [])
+
     // --- Handlers ---
 
     const startDiagnosis = () => {
+        if (questions.length === 0) {
+            alert('質問データの読み込みに失敗しました。リロードしてください。')
+            return
+        }
         setStep('questions')
     }
 
-    const handleAnswer = (isYes: boolean) => {
-        const newAnswers = [...answers, isYes]
+    const handleAnswer = (answer: boolean | string) => {
+        const newAnswers = [...answers, answer]
         setAnswers(newAnswers)
 
-        if (currentQuestionIndex < QUESTIONS.length - 1) {
+        if (currentQuestionIndex < questions.length - 1) {
             setCurrentQuestionIndex((prev) => prev + 1)
         } else {
             setTimeout(() => setStep('form'), 300) // Small delay for animation
@@ -70,43 +93,82 @@ export default function JobMatchingPrototype() {
 
     const handleFormSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
+        setSubmitError(null);
+
         if (!agreedToPrivacy) {
             alert('個人情報の取扱いに同意してください')
             return
         }
 
+        setIsSubmitting(true);
+
         try {
-            const response = await fetch('/api/submit.php', {
+            // Construct payload matching submit.php expectation
+            const payload = {
+                answers: answers,
+                contact: {
+                    name: profile.name,
+                    school: profile.university,
+                    phone: profile.phone,
+                    email: profile.email
+                },
+                consent: true
+            };
+
+            const response = await fetch(`${API_BASE}/submit.php`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                    answers: answers,
-                    contact: {
-                        name: profile.name,
-                        school: profile.university,
-                        phone: profile.phone,
-                        email: profile.email
-                    },
-                    consent: agreedToPrivacy
-                }),
-            })
+                body: JSON.stringify(payload),
+            });
 
-            const data = await response.json()
+            const data = await response.json();
 
-            if (!response.ok) {
-                throw new Error(data.error || 'エラーが発生しました')
+            if (!response.ok || !data.ok) {
+                throw new Error(data.error || '送信に失敗しました');
             }
 
-            // Console Log as requested
-            console.log('--- Diagnosis Complete ---')
-            console.log('Server Response:', data)
+            console.log('--- Submission Successful ---', data);
+            setStep('completion');
 
-            setStep('completion')
-        } catch (error) {
-            console.error('Submission Error:', error)
-            alert(error instanceof Error ? error.message : '通信エラーが発生しました')
+        } catch (error: any) {
+            console.error('Submission failed:', error);
+            setSubmitError(error.message || '送信エラーが発生しました。');
+            alert(error.message || '送信エラーが発生しました。');
+        } finally {
+            setIsSubmitting(false);
+        }
+    }
+
+    // --- Contact Form Logic (Inline for simplicity) ---
+    const [contactSubject, setContactSubject] = useState('')
+    const [contactContent, setContactContent] = useState('')
+    const [contactEmail, setContactEmail] = useState('') // Optional
+    const [isContactSending, setIsContactSending] = useState(false)
+    const [contactSent, setContactSent] = useState(false)
+
+    const handleContactSend = async (e: React.FormEvent) => {
+        e.preventDefault()
+        setIsContactSending(true)
+        try {
+            const res = await fetch(`${API_BASE}/contact.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    subject: contactSubject,
+                    content: contactContent,
+                    email: contactEmail
+                })
+            })
+            const data = await res.json()
+            if (!res.ok || !data.ok) throw new Error(data.error || '送信失敗')
+
+            setContactSent(true)
+        } catch (err: any) {
+            alert(err.message || 'エラーが発生しました')
+        } finally {
+            setIsContactSending(false)
         }
     }
 
@@ -117,7 +179,34 @@ export default function JobMatchingPrototype() {
             <div className="w-full max-w-md bg-white h-full sm:h-[85vh] sm:max-h-[900px] sm:min-h-[600px] sm:rounded-[32px] sm:shadow-2xl relative overflow-hidden flex flex-col">
 
                 {/* Header / Brand - Now Relative in Flow */}
-                <header className="p-6 flex items-center justify-center z-10">
+                <header className="p-6 flex items-center justify-center z-10 relative">
+                    {/* Back Button for non-landing steps */}
+                    {step !== 'landing' && (
+                        <button
+                            onClick={() => {
+                                if (step === 'contact' && contactSent) {
+                                    setStep('landing')
+                                    setContactSent(false)
+                                    setContactSubject('')
+                                    setContactContent('')
+                                    setContactEmail('')
+                                } else if (step === 'contact') {
+                                    setStep('landing')
+                                } else if (step === 'completion') {
+                                    setStep('landing')
+                                    // Reset state if needed
+                                } else {
+                                    // Default behavior for other steps? 
+                                    // Maybe disable for questionnaire flow to avoid losing state easily
+                                    // but for Contact it makes sense to go back.
+                                }
+                            }}
+                            className={`absolute left-6 text-gray-400 hover:text-gray-600 ${step === 'questions' ? 'hidden' : ''}`}
+                        >
+                            {step === 'contact' || step === 'completion' ? <RotateCcw size={20} /> : null}
+                        </button>
+                    )}
+
                     {step !== 'landing' && <span className="text-primary font-bold text-sm tracking-wider">AGENT MATCH</span>}
                 </header>
 
@@ -149,21 +238,37 @@ export default function JobMatchingPrototype() {
                                         whileHover={{ scale: 1.05 }}
                                         whileTap={{ scale: 0.95 }}
                                         onClick={startDiagnosis}
-                                        className="bg-primary text-white font-bold py-4 px-12 rounded-full shadow-lg text-lg flex items-center gap-2"
+                                        disabled={isLoading} // Disable if loading
+                                        className={`font-bold py-4 px-12 rounded-full shadow-lg text-lg flex items-center gap-2 ${isLoading ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-primary text-white'}`}
                                     >
-                                        スタート <ArrowRight size={20} />
+                                        {isLoading ? '読み込み中...' : 'スタート'} {!isLoading && <ArrowRight size={20} />}
                                     </motion.button>
+
+                                    {/* Contact FAB */}
+                                    <div className="fixed bottom-6 right-6 z-50 sm:absolute sm:bottom-8 sm:right-8">
+                                        <motion.button
+                                            whileHover={{ scale: 1.1 }}
+                                            whileTap={{ scale: 0.9 }}
+                                            onClick={() => setStep('contact')}
+                                            className="w-14 h-14 bg-white rounded-full shadow-lg border border-gray-100 flex items-center justify-center text-gray-600 hover:text-primary transition-colors"
+                                        >
+                                            <Mail size={24} />
+                                        </motion.button>
+                                        <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-[10px] py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
+                                            お問い合わせ
+                                        </div>
+                                    </div>
                                 </div>
                             </motion.div>
                         )}
 
                         {/* 2. Swipe Question Screen */}
-                        {step === 'questions' && (
+                        {step === 'questions' && questions.length > 0 && (
                             <QuestionScreen
                                 key="questions"
-                                question={QUESTIONS[currentQuestionIndex]}
+                                question={questions[currentQuestionIndex]}
                                 index={currentQuestionIndex}
-                                total={QUESTIONS.length}
+                                total={questions.length}
                                 onAnswer={handleAnswer}
                                 onBack={handleBack}
                             />
@@ -264,14 +369,15 @@ export default function JobMatchingPrototype() {
 
                                     <button
                                         type="submit"
-                                        disabled={!agreedToPrivacy}
-                                        className={`w-full font-bold py-3 rounded-xl shadow-lg mt-1 transition-all text-sm ${agreedToPrivacy
+                                        disabled={!agreedToPrivacy || isSubmitting}
+                                        className={`w-full font-bold py-3 rounded-xl shadow-lg mt-1 transition-all text-sm ${agreedToPrivacy && !isSubmitting
                                             ? 'bg-primary text-white active:scale-95 shadow-primary/30'
                                             : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                                             }`}
                                     >
-                                        完了して待つ
+                                        {isSubmitting ? '送信中...' : '完了して待つ'}
                                     </button>
+                                    {submitError && <p className="text-red-500 text-xs text-center mt-2">{submitError}</p>}
                                 </form>
                             </motion.div>
                         )}
@@ -291,6 +397,92 @@ export default function JobMatchingPrototype() {
                                 <p className="text-gray-500 leading-relaxed">
                                     あなたにマッチするエージェントから<br />連絡が来ます。<br />しばらくお待ちください。
                                 </p>
+                            </motion.div>
+                        )}
+
+                        {/* 5. Contact Form Screen */}
+                        {step === 'contact' && (
+                            <motion.div
+                                key="contact"
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: 20 }}
+                                className="flex-1 flex flex-col p-6 overflow-y-auto"
+                            >
+                                {contactSent ? (
+                                    <div className="flex-1 flex flex-col items-center justify-center text-center space-y-6">
+                                        <div className="w-20 h-20 bg-green-100 text-green-500 rounded-full flex items-center justify-center mb-4">
+                                            <Check size={40} />
+                                        </div>
+                                        <h2 className="text-xl font-bold text-gray-900">送信完了</h2>
+                                        <p className="text-gray-500 text-sm">お問い合わせありがとうございます。<br />内容を確認次第、担当者よりご連絡いたします。</p>
+                                        <button
+                                            onClick={() => {
+                                                setStep('landing')
+                                                setContactSent(false)
+                                            }}
+                                            className="bg-gray-100 text-gray-600 px-8 py-3 rounded-full font-bold hover:bg-gray-200 transition-colors"
+                                        >
+                                            トップへ戻る
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="mb-6">
+                                            <h2 className="text-xl font-bold text-gray-900 mb-1">お問い合わせ</h2>
+                                            <p className="text-gray-500 text-xs">ご質問やご不明点がございましたら、<br />お気軽にお問い合わせください。</p>
+                                        </div>
+
+                                        <form onSubmit={handleContactSend} className="space-y-4">
+                                            <div className="space-y-1">
+                                                <label className="text-xs font-semibold text-gray-700">件名 <span className="text-red-500">*</span></label>
+                                                <input
+                                                    required
+                                                    type="text"
+                                                    className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all text-sm"
+                                                    placeholder="例：サービスの利用について"
+                                                    value={contactSubject}
+                                                    onChange={e => setContactSubject(e.target.value)}
+                                                />
+                                            </div>
+
+                                            <div className="space-y-1">
+                                                <label className="text-xs font-semibold text-gray-700">メールアドレス <span className="text-gray-400 font-normal">(任意)</span></label>
+                                                <input
+                                                    type="email"
+                                                    className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all text-sm"
+                                                    placeholder="返信をご希望の場合は入力ください"
+                                                    value={contactEmail}
+                                                    onChange={e => setContactEmail(e.target.value)}
+                                                />
+                                            </div>
+
+                                            <div className="space-y-1">
+                                                <label className="text-xs font-semibold text-gray-700">お問い合わせ内容 <span className="text-red-500">*</span></label>
+                                                <textarea
+                                                    required
+                                                    rows={6}
+                                                    className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all text-sm resize-none"
+                                                    placeholder="お問い合わせ内容をご記入ください..."
+                                                    value={contactContent}
+                                                    onChange={e => setContactContent(e.target.value)}
+                                                />
+                                            </div>
+
+                                            <button
+                                                type="submit"
+                                                disabled={isContactSending || !contactSubject || !contactContent}
+                                                className={`w-full font-bold py-3.5 rounded-xl shadow-lg mt-2 transition-all text-sm flex items-center justify-center gap-2 ${(!contactSubject || !contactContent || isContactSending)
+                                                        ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                                        : 'bg-primary text-white active:scale-95 shadow-primary/30'
+                                                    }`}
+                                            >
+                                                {isContactSending ? '送信中...' : '送信する'}
+                                                {!isContactSending && <Send size={16} />}
+                                            </button>
+                                        </form>
+                                    </>
+                                )}
                             </motion.div>
                         )}
 
@@ -327,20 +519,18 @@ function QuestionScreen({
     question: Question
     index: number
     total: number
-    onAnswer: (a: boolean) => void
+    onAnswer: (a: boolean | string) => void
     onBack: () => void
 }) {
-    const x = useMotionValue(0)
-    const rotate = useTransform(x, [-200, 200], [-30, 30])
-    const opacityYes = useTransform(x, [0, 150], [0, 1])
-    const opacityNo = useTransform(x, [0, -150], [0, 1])
+    const [exitDirection, setExitDirection] = useState(0)
 
-    const handleDragEnd = (_: any, info: any) => {
-        if (info.offset.x > 100) {
-            onAnswer(true)
-        } else if (info.offset.x < -100) {
-            onAnswer(false)
+    const handleAnswer = (val: boolean | string) => {
+        if (typeof val === 'boolean') {
+            setExitDirection(val ? 1 : -1)
+        } else {
+            setExitDirection(1)
         }
+        onAnswer(val)
     }
 
     return (
@@ -358,66 +548,27 @@ function QuestionScreen({
                 <p className="text-center text-xs text-gray-400 mt-2 font-mono">{index + 1} / {total}</p>
             </div>
 
-            {/* Card Area - Flex Center */}
+            {/* Content Area */}
             <div className="relative w-full max-w-[340px] aspect-[3/4] flex items-center justify-center">
-                {/* Card Component */}
-                <motion.div
-                    className="absolute w-full h-full bg-white rounded-3xl shadow-xl border border-gray-100 flex flex-col items-center justify-center p-8 text-center cursor-grab active:cursor-grabbing z-10"
-                    style={{ x, rotate }}
-                    drag="x"
-                    dragConstraints={{ left: 0, right: 0 }}
-                    onDragEnd={handleDragEnd}
-                    initial={{ scale: 0.95, opacity: 0, y: 50 }}
-                    animate={{ scale: 1, opacity: 1, y: 0 }}
-                    exit={{
-                        x: x.get() < 0 ? -500 : 500,
-                        opacity: 0,
-                        transition: { duration: 0.2 }
-                    }}
-                    transition={{ type: "spring", stiffness: 300, damping: 20 }}
-                >
-                    <h3 className="text-xl font-bold text-gray-800 leading-relaxed select-none">
-                        {question.text}
-                    </h3>
-
-                    <div className="absolute bottom-8 text-gray-400 text-sm flex gap-8 select-none">
-                        <div className="flex items-center gap-1"><span className="text-red-400">←</span> NO</div>
-                        <div className="flex items-center gap-1">YES <span className="text-green-500">→</span></div>
-                    </div>
-
-                    {/* Overlays */}
-                    <motion.div
-                        style={{ opacity: opacityYes }}
-                        className="absolute inset-0 bg-green-500/10 rounded-3xl flex items-center justify-center pointer-events-none"
-                    >
-                        <div className="border-4 border-green-500 text-green-500 font-bold text-4xl px-4 py-2 rounded -rotate-12 bg-white/50">
-                            YES
-                        </div>
-                    </motion.div>
-
-                    <motion.div
-                        style={{ opacity: opacityNo }}
-                        className="absolute inset-0 bg-red-500/10 rounded-3xl flex items-center justify-center pointer-events-none"
-                    >
-                        <div className="border-4 border-red-500 text-red-500 font-bold text-4xl px-4 py-2 rounded rotate-12 bg-white/50">
-                            NO
-                        </div>
-                    </motion.div>
-
-                </motion.div>
-
-                {/* Background Card for Scale Effect (Optional aesthetic) */}
-                <div className="absolute w-[90%] h-[90%] bg-gray-50 rounded-3xl -z-10 translate-y-3" />
+                <AnimatePresence mode="wait" custom={exitDirection}>
+                    {question.type === 'selection' ? (
+                        <SelectionView
+                            key={`q-${question.id}`}
+                            question={question}
+                            onAnswer={handleAnswer}
+                        />
+                    ) : (
+                        <SwipeView
+                            key={`q-${question.id}`}
+                            question={question}
+                            onAnswer={handleAnswer}
+                            custom={exitDirection}
+                        />
+                    )}
+                </AnimatePresence>
             </div>
 
-            <div className="mt-8 flex gap-4">
-                <button className="w-14 h-14 rounded-full bg-white shadow-lg text-red-500 flex items-center justify-center hover:bg-red-50 transition-colors" onClick={() => onAnswer(false)}>
-                    <X />
-                </button>
-                <button className="w-14 h-14 rounded-full bg-white shadow-lg text-green-500 flex items-center justify-center hover:bg-green-50 transition-colors" onClick={() => onAnswer(true)}>
-                    <Check />
-                </button>
-            </div>
+            <ActionsArea question={question} onAnswer={handleAnswer as (val: boolean) => void} />
 
             {/* Back Button */}
             <div className="mt-6">
@@ -430,6 +581,141 @@ function QuestionScreen({
                     <span>前に戻る</span>
                 </button>
             </div>
+        </div>
+    )
+}
+
+function SelectionView({
+    question,
+    onAnswer
+}: {
+    question: Question
+    onAnswer: (val: string) => void
+}) {
+    return (
+        <motion.div
+            className="w-full h-full bg-white rounded-3xl shadow-xl border border-gray-100 flex flex-col items-center p-6 z-10"
+            initial={{ scale: 0.95, opacity: 0, y: 50 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.95, opacity: 0, y: -50 }}
+            transition={{ type: "spring", stiffness: 300, damping: 25 }}
+        >
+            <h3 className="text-xl font-bold text-gray-800 leading-relaxed text-center mb-6">
+                {question.text}
+            </h3>
+
+            <div className="w-full flex-1 flex flex-col gap-3 justify-center overflow-y-auto no-scrollbar">
+                {question.options?.map((option) => (
+                    <motion.button
+                        key={option}
+                        whileHover={{ scale: 1.02, backgroundColor: '#f3f4f6' }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => onAnswer(option)}
+                        className="w-full p-4 rounded-xl border-2 border-gray-100 text-left font-bold text-gray-700 hover:border-primary/30 transition-colors flex items-center justify-between group"
+                    >
+                        <span>{option}</span>
+                        <ArrowRight size={16} className="text-gray-300 group-hover:text-primary transition-colors" />
+                    </motion.button>
+                ))}
+            </div>
+        </motion.div>
+    )
+}
+
+function SwipeView({
+    question,
+    onAnswer,
+    custom
+}: {
+    question: Question
+    onAnswer: (val: boolean) => void
+    custom?: number
+}) {
+    const x = useMotionValue(0)
+    const rotate = useTransform(x, [-200, 200], [-30, 30])
+    const opacityYes = useTransform(x, [0, 150], [0, 1])
+    const opacityNo = useTransform(x, [0, -150], [0, 1])
+
+    const handleDragEnd = (_: any, info: any) => {
+        if (info.offset.x > 100) {
+            onAnswer(true)
+        } else if (info.offset.x < -100) {
+            onAnswer(false)
+        }
+    }
+
+    const variants = {
+        enter: { scale: 0.95, opacity: 0, y: 50 },
+        center: { scale: 1, opacity: 1, y: 0 },
+        exit: (direction: number) => ({
+            x: direction < 0 ? -500 : 500,
+            opacity: 0,
+            transition: { duration: 0.2 }
+        })
+    }
+
+    return (
+        <>
+            <motion.div
+                className="absolute w-full h-full bg-white rounded-3xl shadow-xl border border-gray-100 flex flex-col items-center justify-center p-8 text-center cursor-grab active:cursor-grabbing z-10"
+                style={{ x, rotate }}
+                drag="x"
+                dragConstraints={{ left: 0, right: 0 }}
+                onDragEnd={handleDragEnd}
+                variants={variants}
+                custom={custom}
+                initial="enter"
+                animate="center"
+                exit="exit"
+                transition={{ type: "spring", stiffness: 300, damping: 20 }}
+            >
+                <h3 className="text-xl font-bold text-gray-800 leading-relaxed select-none">
+                    {question.text}
+                </h3>
+
+                <div className="absolute bottom-8 text-gray-400 text-sm flex gap-8 select-none">
+                    <div className="flex items-center gap-1"><span className="text-red-400">←</span> NO</div>
+                    <div className="flex items-center gap-1">YES <span className="text-green-500">→</span></div>
+                </div>
+
+                {/* Overlays */}
+                <motion.div
+                    style={{ opacity: opacityYes }}
+                    className="absolute inset-0 bg-green-500/10 rounded-3xl flex items-center justify-center pointer-events-none"
+                >
+                    <div className="border-4 border-green-500 text-green-500 font-bold text-4xl px-4 py-2 rounded -rotate-12 bg-white/50">
+                        YES
+                    </div>
+                </motion.div>
+
+                <motion.div
+                    style={{ opacity: opacityNo }}
+                    className="absolute inset-0 bg-red-500/10 rounded-3xl flex items-center justify-center pointer-events-none"
+                >
+                    <div className="border-4 border-red-500 text-red-500 font-bold text-4xl px-4 py-2 rounded rotate-12 bg-white/50">
+                        NO
+                    </div>
+                </motion.div>
+
+            </motion.div>
+
+            {/* Background Card for Scale Effect (Optional aesthetic) */}
+            <div className="absolute w-[90%] h-[90%] bg-gray-50 rounded-3xl -z-10 translate-y-3" />
+        </>
+    )
+}
+
+function ActionsArea({ question, onAnswer }: { question: Question, onAnswer: (val: boolean) => void }) {
+    if (question.type !== 'swipe') return <div className="h-14 mt-8" /> // Spacer to keep layout stable
+
+    return (
+        <div className="mt-8 flex gap-4">
+            <button className="w-14 h-14 rounded-full bg-white shadow-lg text-red-500 flex items-center justify-center hover:bg-red-50 transition-colors" onClick={() => onAnswer(false)}>
+                <X />
+            </button>
+            <button className="w-14 h-14 rounded-full bg-white shadow-lg text-green-500 flex items-center justify-center hover:bg-green-50 transition-colors" onClick={() => onAnswer(true)}>
+                <Check />
+            </button>
         </div>
     )
 }

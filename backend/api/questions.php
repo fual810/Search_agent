@@ -6,77 +6,52 @@ require_once __DIR__ . '/../config.php';
 apply_cors();
 handle_options_if_needed();
 
-$questions = [
-    [
-        'id' => 'grad_year',
-        'title' => '卒業年は？',
-        'type' => 'single',
-        'options' => ['2026卒', '2027卒', '既卒'],
-        'required' => true,
-    ],
-    [
-        'id' => 'degree',
-        'title' => '学歴区分は？',
-        'type' => 'single',
-        'options' => ['学部', '修士', '博士'],
-        'required' => true,
-    ],
-    [
-        'id' => 'major',
-        'title' => '文理は？',
-        'type' => 'single',
-        'options' => ['文系', '理系', '情報系', 'その他'],
-        'required' => true,
-    ],
-    [
-        'id' => 'location',
-        'title' => '希望勤務地は？',
-        'type' => 'single',
-        'options' => ['全国', '関東', '関西', 'その他'],
-        'required' => true,
-    ],
-    [
-        'id' => 'industry',
-        'title' => '志望業界は？',
-        'type' => 'single',
-        'options' => ['IT', 'メーカー', 'コンサル', '金融', 'その他'],
-        'required' => true,
-    ],
-    [
-        'id' => 'job_type',
-        'title' => '志望職種は？',
-        'type' => 'single',
-        'options' => ['エンジニア', 'データ', '企画', '営業', 'その他'],
-        'required' => true,
-    ],
-    [
-        'id' => 'progress',
-        'title' => '就活の進捗は？',
-        'type' => 'single',
-        'options' => ['これから', 'ES中', '面接中', '内定あり'],
-        'required' => true,
-    ],
-    [
-        'id' => 'offer_timing',
-        'title' => '内定を取りたい時期は？',
-        'type' => 'single',
-        'options' => ['1ヶ月以内', '3ヶ月以内', '半年以内', '未定'],
-        'required' => false,
-    ],
-    [
-        'id' => 'trouble',
-        'title' => '困っていることは？',
-        'type' => 'single',
-        'options' => ['自己分析', 'ES', '面接', '企業探し', 'その他'],
-        'required' => false,
-    ],
-    [
-        'id' => 'contact_pref',
-        'title' => '連絡手段の希望は？',
-        'type' => 'single',
-        'options' => ['メール', '電話', 'どちらでも'],
-        'required' => true,
-    ],
-];
+$pdo = get_db_connection();
 
-json_response(['questions' => $questions]);
+try {
+    // Fetch questions ordered by sort_order
+    $stmt = $pdo->query("
+        SELECT 
+            q.id, 
+            q.text, 
+            q.type, 
+            qo.option_text 
+        FROM questions q
+        LEFT JOIN question_options qo ON q.id = qo.question_id
+        WHERE q.active = 1
+        ORDER BY q.sort_order ASC, qo.sort_order ASC
+    ");
+
+    $rawQuestions = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $questions = [];
+    $tempMap = [];
+
+    foreach ($rawQuestions as $row) {
+        $qId = $row['id'];
+        
+        if (!isset($tempMap[$qId])) {
+            $tempMap[$qId] = [
+                'id' => (int)$qId,
+                'text' => $row['text'],
+                'type' => $row['type'],
+                // 'options' field will be added only if there are options
+            ];
+        }
+
+        if ($row['option_text'] !== null) {
+            if (!isset($tempMap[$qId]['options'])) {
+                $tempMap[$qId]['options'] = [];
+            }
+            $tempMap[$qId]['options'][] = $row['option_text'];
+        }
+    }
+
+    // Convert map to indexed array to preserve sort order from DB query
+    $questions = array_values($tempMap);
+
+    json_response(['questions' => $questions]);
+
+} catch (PDOException $e) {
+    json_response(['ok' => false, 'error' => 'Database error: ' . $e->getMessage()], 500);
+}
